@@ -25,7 +25,7 @@ Notion 내장 GitHub 동기화는 이슈와 PR만 지원하고 저장소 목록 
 
 ## Notion DB 스키마
 
-`init` 잡이 아래 19개 프로퍼티를 갖춘 DB를 만들어준다.
+`init` 잡이 아래 16개 프로퍼티를 갖춘 DB를 만들어준다.
 
 > DB 를 다른 페이지로 **이동**하면 integration 권한 상속이 끊겨 접근이 404 가 된다.
 > 이동 후에는 새 위치에서 Connections 를 다시 추가해야 한다. DB **제목** 변경은 안전하지만,
@@ -47,14 +47,11 @@ Notion 내장 GitHub 동기화는 이슈와 PR만 지원하고 저장소 목록 
 | `Topics` | multi_select | 토픽 태그 |
 | `Stars` | number | 스타 수 |
 | `Open Issues` | number | 열린 이슈 수 |
-| `Archived` | checkbox | 아카이브 여부 |
-| `Fork` | checkbox | 포크 여부 |
 | `Default Branch` | rich_text | 기본 브랜치 |
 | `Pushed At` | date | 마지막 푸시 |
 | `Created At` | date | 생성일 |
 | `Last Committer` | select | 마지막 커밋 작성자 (GitHub login) |
 | `Last Commit At` | date | 마지막 커밋 시각 |
-| `Synced At` | date | 마지막 동기화 시각 |
 | `Sync Signature` | rich_text | 변경 감지용 해시 (건드리지 말 것) |
 
 프로퍼티 이름을 바꾸려면 `github_to_notion.py` 상단의 `P_*` 상수만 고치면 된다. `init` 잡이 같은 이름으로 DB를 만들기 때문에 양쪽이 함께 바뀐다.

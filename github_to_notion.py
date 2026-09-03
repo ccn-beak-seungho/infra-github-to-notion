@@ -125,12 +125,9 @@ P_VISIBILITY  = "Visibility"      # select
 P_TOPICS      = "Topics"          # multi_select
 P_STARS       = "Stars"           # number
 P_OPEN_ISSUES = "Open Issues"     # number
-P_ARCHIVED    = "Archived"        # checkbox
-P_FORK        = "Fork"            # checkbox
 P_BRANCH      = "Default Branch"  # rich_text
 P_PUSHED_AT   = "Pushed At"       # date
 P_CREATED_AT  = "Created At"      # date
-P_SYNCED_AT   = "Synced At"       # date
 P_COMMITTER   = "Last Committer"   # select   (마지막 커밋 작성자)
 P_COMMIT_AT   = "Last Commit At"   # date     (마지막 커밋 시각)
 P_SIGNATURE   = "Sync Signature"  # rich_text (변경 감지용 해시)
@@ -397,8 +394,6 @@ def build_properties(repo: dict, last_commit: dict = None) -> dict:
         P_TOPICS:      {"multi_select": [{"name": t[:100]} for t in topics[:100]]},
         P_STARS:       {"number": repo.get("stargazers_count", 0)},
         P_OPEN_ISSUES: {"number": repo.get("open_issues_count", 0)},
-        P_ARCHIVED:    {"checkbox": bool(repo.get("archived"))},
-        P_FORK:        {"checkbox": bool(repo.get("fork"))},
         P_BRANCH:      {"rich_text": _rich_text(repo.get("default_branch") or "")},
         P_PUSHED_AT:   {"date": _date(repo.get("pushed_at"))},
         P_CREATED_AT:  {"date": _date(repo.get("created_at"))},
@@ -445,7 +440,6 @@ def fetch_existing_pages(data_source_id: str) -> dict:
 # ── 업서트 ───────────────────────────────────────────────────
 def sync_repos(data_source_id: str, repos: list) -> dict:
     existing = fetch_existing_pages(data_source_id)
-    now_iso = datetime.now(timezone.utc).isoformat()
 
     stats = {"created": 0, "updated": 0, "skipped": 0, "archived": 0}
     seen_ids = set()
@@ -464,7 +458,6 @@ def sync_repos(data_source_id: str, repos: list) -> dict:
             continue
 
         props[P_SIGNATURE] = {"rich_text": _rich_text(signature)}
-        props[P_SYNCED_AT] = {"date": {"start": now_iso}}
 
         if current:
             print(f"  갱신: {repo['full_name']}")
@@ -526,12 +519,9 @@ def init_database() -> dict:
         P_TOPICS:      {"type": "multi_select", "multi_select": {}},
         P_STARS:       {"type": "number",       "number": {}},
         P_OPEN_ISSUES: {"type": "number",       "number": {}},
-        P_ARCHIVED:    {"type": "checkbox",     "checkbox": {}},
-        P_FORK:        {"type": "checkbox",     "checkbox": {}},
         P_BRANCH:      {"type": "rich_text",    "rich_text": {}},
         P_PUSHED_AT:   {"type": "date",         "date": {}},
         P_CREATED_AT:  {"type": "date",         "date": {}},
-        P_SYNCED_AT:   {"type": "date",         "date": {}},
         P_COMMITTER:   {"type": "select",       "select": {}},
         P_COMMIT_AT:   {"type": "date",         "date": {}},
         P_SIGNATURE:   {"type": "rich_text",    "rich_text": {}},
