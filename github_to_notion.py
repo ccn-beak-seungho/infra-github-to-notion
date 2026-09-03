@@ -92,6 +92,12 @@ ARCHIVE_UNMATCHED = os.environ.get("ARCHIVE_UNMATCHED", "false").lower() == "tru
 # 실제 쓰기 없이 계획만 로그로 출력
 DRY_RUN = os.environ.get("DRY_RUN", "false").lower() == "true"
 
+# ── init 잡 DB 생성 옵션 ─────────────────────────────────────
+# 인라인 DB(페이지 본문에 embed)로 만들지 여부. false 면 전체 페이지형.
+NOTION_DB_INLINE = os.environ.get("NOTION_DB_INLINE", "true").lower() == "true"
+# DB 제목. 비우면 "{조직명} Repositories".
+NOTION_DB_TITLE  = os.environ.get("NOTION_DB_TITLE", "").strip()
+
 # ── Slack 실패 알림 (선택) ───────────────────────────────────
 # 둘 다 설정된 경우에만 알림을 보낸다. 없으면 조용히 건너뛴다.
 SLACK_BOT_TOKEN = os.environ.get("SLACK_BOT_TOKEN", "")
@@ -499,10 +505,13 @@ def init_database() -> dict:
         P_SIGNATURE:   {"type": "rich_text",    "rich_text": {}},
     }
 
+    title = NOTION_DB_TITLE or f"{GITHUB_ORG} Repositories"
+
     db = notion_request("databases", {
         "parent": {"type": "page_id", "page_id": NOTION_PARENT_PAGE_ID},
-        "title": [{"type": "text", "text": {"content": f"{GITHUB_ORG} Repositories"}}],
+        "title": [{"type": "text", "text": {"content": title}}],
         "icon": {"type": "emoji", "emoji": "📦"},
+        "is_inline": NOTION_DB_INLINE,
         "initial_data_source": {"properties": schema},
     })
 
@@ -510,7 +519,9 @@ def init_database() -> dict:
     ds = db.get("data_sources", [])
     ds_id = ds[0]["id"] if ds else ""
 
-    print("데이터베이스를 만들었습니다. 아래 값을 환경 변수에 넣으세요:")
+    kind = "인라인" if NOTION_DB_INLINE else "전체 페이지형"
+    print(f"데이터베이스를 만들었습니다 ({kind}, 제목='{title}').")
+    print("아래 값을 환경 변수에 넣으세요:")
     print(f"  NOTION_REPO_DB_ID={db_id}")
     if ds_id:
         print(f"  NOTION_REPO_DATA_SOURCE_ID={ds_id}")

@@ -27,6 +27,11 @@ Notion 내장 GitHub 동기화는 이슈와 PR만 지원하고 저장소 목록 
 
 `init` 잡이 아래 17개 프로퍼티를 갖춘 DB를 만들어준다.
 
+> DB 를 다른 페이지로 **이동**하면 integration 권한 상속이 끊겨 접근이 404 가 된다.
+> 이동 후에는 새 위치에서 Connections 를 다시 추가해야 한다. DB **제목** 변경은 안전하지만,
+> **프로퍼티 이름**은 바꾸면 안 된다 (`Repo ID` 는 업서트 키, `Sync Signature` 는 변경 감지용).
+> 보기 싫은 컬럼은 삭제 대신 Notion 뷰에서 숨긴다.
+
 | 프로퍼티 | 타입 | 출처 |
 |---|---|---|
 | `Name` | title | 저장소 이름 |
@@ -88,6 +93,8 @@ Resource owner 를 조직으로 지정하면 토큰이 `pending` 상태로 발�
 | `REPO_NAME_PREFIX` | 둘 중 하나 | 콤마 구분 접두사. 예: `svc-,lambda-` |
 | `REPO_NAME_REGEX` | 둘 중 하나 | 정규식. 설정되면 PREFIX 는 무시된다. 예: `^(svc\|lambda)-` |
 | `NOTION_PARENT_PAGE_ID` | init 시 | DB 를 만들 부모 페이지. 생성 후엔 불필요 |
+| `NOTION_DB_INLINE` | | 기본 `true`. 페이지 본문에 embed 되는 인라인 DB 로 만든다. `false` 면 전체 페이지형 |
+| `NOTION_DB_TITLE` | | DB 제목. 비우면 `{조직명} Repositories` |
 | `NOTION_REPO_DB_ID` | sync 시 | `init` 이 출력해주는 값 |
 | `NOTION_REPO_DATA_SOURCE_ID` | | 비우면 DB 의 첫 data source 를 자동 선택 |
 | `INCLUDE_FORKS` | | 기본 `true`. `false` 면 포크 제외 |
