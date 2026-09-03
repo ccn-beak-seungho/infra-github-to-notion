@@ -140,8 +140,9 @@ P_NAME        = "Name"            # title
 P_FULL_NAME   = "Full Name"       # rich_text
 P_REPO_ID     = "Repo ID"         # number  (업서트 키)
 P_URL         = "URL"             # url
-P_DESC        = "Description"     # rich_text
-P_DESC_JA     = "Description (JA)"  # rich_text (일본어 설명)
+P_DESC        = "Description"     # rich_text (GitHub 저장소 설명 원문)
+P_SUMMARY     = "Summary"          # rich_text (README 요약, 한국어)
+P_SUMMARY_JA  = "Summary (JA)"     # rich_text (README 요약, 일본어)
 P_LANGUAGE    = "Language"        # select
 P_VISIBILITY  = "Visibility"      # select
 P_TOPICS      = "Topics"          # multi_select
@@ -502,7 +503,6 @@ def build_properties(repo: dict, last_commit: dict = None, has_readme: bool = Fa
         P_REPO_ID:     {"number": repo["id"]},
         P_URL:         {"url": repo.get("html_url") or None},
         P_DESC:        {"rich_text": _rich_text(repo.get("description") or "")},
-        P_DESC_JA:     {"rich_text": []},
         P_LANGUAGE:    {"select": _select(repo.get("language"))},
         P_VISIBILITY:  {"select": _select(repo.get("visibility") or ("private" if repo.get("private") else "public"))},
         P_TOPICS:      {"multi_select": [{"name": t[:100]} for t in topics[:100]]},
@@ -539,20 +539,24 @@ def fetch_existing_pages(data_source_id: str) -> dict:
                 # Repo ID가 없는 행은 사람이 직접 만든 것으로 보고 건드리지 않는다.
                 continue
 
-            sig_blocks = (props.get(P_SIGNATURE) or {}).get("rich_text") or []
-            signature = sig_blocks[0]["plain_text"] if sig_blocks else ""
-
-            def _filled(key):
+            def _text(key):
                 blocks = (props.get(key) or {}).get("rich_text") or []
-                return bool(blocks and blocks[0].get("plain_text", "").strip())
+                return blocks[0].get("plain_text", "").strip() if blocks else ""
 
-            # 두 언어가 모두 채워졌을 때만 완료로 본다.
-            has_desc = _filled(P_DESC) and _filled(P_DESC_JA)
+            # 시그니처는 "해시:README_SHA" 형태로 저장한다. README 가 그대로면
+            # 기존 요약을 재사용해 LLM 재호출과 문장 흔들림을 막는다.
+            stored = _text(P_SIGNATURE)
+            sig, _, readme_sha = stored.partition(":")
+
+            summary_ko, summary_ja = _text(P_SUMMARY), _text(P_SUMMARY_JA)
 
             index[int(repo_id)] = {
                 "page_id": page["id"],
-                "signature": signature,
-                "has_desc": has_desc,
+                "signature": sig,
+                "readme_sha": readme_sha,
+                "has_desc": bool(summary_ko and summary_ja),
+                "summary_ko": summary_ko,
+                "summary_ja": summary_ja,
             }
 
         if not result.get("has_more"):
@@ -583,31 +587,35 @@ def sync_repos(data_source_id: str, repos: list) -> dict:
         signature = signature_of({**props, "_readme_sha": readme.get("sha", "")})
 
         current = existing.get(repo_id)
+        readme_sha = readme.get("sha", "")
 
-        # 요약을 만들 수 있는데 아직 비어 있는 행은 해시가 같아도 채워준다.
-        # (요약문은 해시에 없으므로, 이 예외가 없으면 영영 비어 있게 된다)
-        needs_summary = bool(
-            AI_GATEWAY_URL
-            and readme.get("text")
-            and not repo.get("description")
-            and current
-            and not current.get("has_desc")
+        wants_summary = bool(AI_GATEWAY_URL and readme.get("text"))
+        # README 가 그대로이고 두 언어가 모두 차 있으면 기존 요약을 그대로 쓴다.
+        summary_current = bool(
+            current
+            and current.get("readme_sha") == readme_sha
+            and current.get("has_desc")
         )
 
-        if current and current["signature"] == signature and not needs_summary:
+        if (current and current["signature"] == signature
+                and (not wants_summary or summary_current)):
             stats["skipped"] += 1
             continue
 
-        # GitHub 의 description 이 있으면 사람이 쓴 그것을 우선하고,
-        # 비어 있을 때만 README 요약으로 채운다.
-        if not repo.get("description") and readme.get("text"):
-            summary = summarize_readme(full_name, readme["text"])
-            if summary.get("ko"):
-                props[P_DESC] = {"rich_text": _rich_text(summary["ko"])}
-            if summary.get("ja"):
-                props[P_DESC_JA] = {"rich_text": _rich_text(summary["ja"])}
+        # 요약은 Description(GitHub 원문)과 별개 칸이라 서로 덮어쓰지 않는다.
+        if wants_summary:
+            if summary_current:
+                # 재요약하지 않는다. 매번 문장이 미세하게 바뀌는 것을 막는다.
+                props[P_SUMMARY]    = {"rich_text": _rich_text(current["summary_ko"])}
+                props[P_SUMMARY_JA] = {"rich_text": _rich_text(current["summary_ja"])}
+            else:
+                summary = summarize_readme(full_name, readme["text"])
+                if summary.get("ko"):
+                    props[P_SUMMARY] = {"rich_text": _rich_text(summary["ko"])}
+                if summary.get("ja"):
+                    props[P_SUMMARY_JA] = {"rich_text": _rich_text(summary["ja"])}
 
-        props[P_SIGNATURE] = {"rich_text": _rich_text(signature)}
+        props[P_SIGNATURE] = {"rich_text": _rich_text(f"{signature}:{readme_sha}")}
 
         if current:
             print(f"  갱신: {repo['full_name']}")
@@ -664,7 +672,8 @@ def init_database() -> dict:
         P_REPO_ID:     {"type": "number",       "number": {}},
         P_URL:         {"type": "url",          "url": {}},
         P_DESC:        {"type": "rich_text",    "rich_text": {}},
-        P_DESC_JA:     {"type": "rich_text",    "rich_text": {}},
+        P_SUMMARY:     {"type": "rich_text",    "rich_text": {}},
+        P_SUMMARY_JA:  {"type": "rich_text",    "rich_text": {}},
         P_LANGUAGE:    {"type": "select",       "select": {}},
         P_VISIBILITY:  {"type": "select",       "select": {}},
         P_TOPICS:      {"type": "multi_select", "multi_select": {}},
