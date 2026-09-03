@@ -11,6 +11,9 @@
 set -euo pipefail
 cd "$(dirname "$0")"
 
+# 자격 증명이 담기는 임시 파일은 실패·중단 포함 어떤 경로로 끝나든 반드시 지운다.
+trap 'rm -f build/env.json' EXIT INT TERM
+
 FUNCTION_NAME="${FUNCTION_NAME:-github-to-notion}"
 REGION="${AWS_REGION:-ap-northeast-1}"
 RUNTIME="python3.12"
@@ -66,6 +69,9 @@ ensure_role() {
 # 람다에 실제로 필요한 키만 화이트리스트로 추린다.
 # NOTION_PARENT_PAGE_ID 는 init 잡 전용이라 제외, DRY_RUN 도 제외.
 build_env_json() {
+  # umask 077: 리다이렉트로 파일이 만들어지는 순간부터 600 이 되도록 한다.
+  # (chmod 를 나중에 걸면 그 사이 짧게 644 로 존재한다)
+  umask 077
   python3 - << 'PYEOF' > build/env.json
 import json, os
 KEYS = [
@@ -94,7 +100,6 @@ if not (env.get("REPO_NAME_PREFIX") or env.get("REPO_NAME_REGEX")):
 
 print(json.dumps({"Variables": env}))
 PYEOF
-  chmod 600 build/env.json
 }
 
 # ── 함수 생성/갱신 ───────────────────────────────────────────
@@ -166,7 +171,6 @@ case "${1:-deploy}" in
     ensure_role
     deploy_function
     setup_schedule
-    rm -f build/env.json
     log "완료. 즉시 테스트: ./deploy.sh invoke"
     ;;
   *)
