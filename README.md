@@ -25,7 +25,7 @@ Notion 내장 GitHub 동기화는 이슈와 PR만 지원하고 저장소 목록 
 
 ## Notion DB 스키마
 
-`init` 잡이 아래 19개 프로퍼티를 갖춘 DB를 만들어준다.
+`init` 잡이 아래 18개 프로퍼티를 갖춘 DB를 만들어준다.
 
 > DB 를 다른 페이지로 **이동**하면 integration 권한 상속이 끊겨 접근이 404 가 된다.
 > 이동 후에는 새 위치에서 Connections 를 다시 추가해야 한다. DB **제목** 변경은 안전하지만,
@@ -42,8 +42,7 @@ Notion 내장 GitHub 동기화는 이슈와 PR만 지원하고 저장소 목록 
 | `Repo ID` | number | GitHub 숫자 id (업서트 키) |
 | `URL` | url | 저장소 링크 |
 | `Description` | rich_text | GitHub 저장소 설명 원문 |
-| `Summary` | rich_text | README 요약 (한국어) |
-| `Summary (JA)` | rich_text | README 요약 (일본어) |
+| `Summary` | rich_text | README 요약. 일본어 / 줄바꿈 / 한국어 순으로 한 칸에 담긴다 |
 | `Language` | select | 주 언어 |
 | `Visibility` | select | public / private |
 | `Topics` | multi_select | 토픽 태그 |

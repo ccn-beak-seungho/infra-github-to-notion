@@ -141,8 +141,7 @@ P_FULL_NAME   = "Full Name"       # rich_text
 P_REPO_ID     = "Repo ID"         # number  (업서트 키)
 P_URL         = "URL"             # url
 P_DESC        = "Description"     # rich_text (GitHub 저장소 설명 원문)
-P_SUMMARY     = "Summary"          # rich_text (README 요약, 한국어)
-P_SUMMARY_JA  = "Summary (JA)"     # rich_text (README 요약, 일본어)
+P_SUMMARY     = "Summary"          # rich_text (README 요약: 일본어 + 줄바꿈 + 한국어)
 P_LANGUAGE    = "Language"        # select
 P_VISIBILITY  = "Visibility"      # select
 P_TOPICS      = "Topics"          # multi_select
@@ -548,15 +547,14 @@ def fetch_existing_pages(data_source_id: str) -> dict:
             stored = _text(P_SIGNATURE)
             sig, _, readme_sha = stored.partition(":")
 
-            summary_ko, summary_ja = _text(P_SUMMARY), _text(P_SUMMARY_JA)
+            summary = _text(P_SUMMARY)
 
             index[int(repo_id)] = {
                 "page_id": page["id"],
                 "signature": sig,
                 "readme_sha": readme_sha,
-                "has_desc": bool(summary_ko and summary_ja),
-                "summary_ko": summary_ko,
-                "summary_ja": summary_ja,
+                "has_desc": bool(summary),
+                "summary": summary,
             }
 
         if not result.get("has_more"):
@@ -606,14 +604,15 @@ def sync_repos(data_source_id: str, repos: list) -> dict:
         if wants_summary:
             if summary_current:
                 # 재요약하지 않는다. 매번 문장이 미세하게 바뀌는 것을 막는다.
-                props[P_SUMMARY]    = {"rich_text": _rich_text(current["summary_ko"])}
-                props[P_SUMMARY_JA] = {"rich_text": _rich_text(current["summary_ja"])}
+                props[P_SUMMARY] = {"rich_text": _rich_text(current["summary"])}
             else:
                 summary = summarize_readme(full_name, readme["text"])
-                if summary.get("ko"):
-                    props[P_SUMMARY] = {"rich_text": _rich_text(summary["ko"])}
-                if summary.get("ja"):
-                    props[P_SUMMARY_JA] = {"rich_text": _rich_text(summary["ja"])}
+                # 일본어를 먼저 두고 줄바꿈 뒤에 한국어를 붙인다.
+                combined = "\n".join(
+                    t for t in (summary.get("ja"), summary.get("ko")) if t
+                )
+                if combined:
+                    props[P_SUMMARY] = {"rich_text": _rich_text(combined)}
 
         props[P_SIGNATURE] = {"rich_text": _rich_text(f"{signature}:{readme_sha}")}
 
@@ -673,7 +672,6 @@ def init_database() -> dict:
         P_URL:         {"type": "url",          "url": {}},
         P_DESC:        {"type": "rich_text",    "rich_text": {}},
         P_SUMMARY:     {"type": "rich_text",    "rich_text": {}},
-        P_SUMMARY_JA:  {"type": "rich_text",    "rich_text": {}},
         P_LANGUAGE:    {"type": "select",       "select": {}},
         P_VISIBILITY:  {"type": "select",       "select": {}},
         P_TOPICS:      {"type": "multi_select", "multi_select": {}},
