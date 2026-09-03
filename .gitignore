@@ -1,4 +1,18 @@
+# 자격 증명
 .env
+.env.*
+!.env.example
+
+# 편집기 스왑/백업 (.env 내용이 그대로 담길 수 있음)
+*.swp
+*.swo
+*~
+.*.sw[a-z]
+
+# 빌드 산출물
+build/
 __pycache__/
 *.pyc
-build/
+
+# macOS
+.DS_Store
