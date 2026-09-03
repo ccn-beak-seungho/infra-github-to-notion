@@ -144,8 +144,14 @@ setup_schedule() {
     --action lambda:InvokeFunction --principal events.amazonaws.com \
     --source-arn "$rule_arn" --region "$REGION" >/dev/null 2>&1 || true
 
+  # 축약 문법(Id=..,Arn=..)은 값 안의 JSON 을 파싱하지 못한다.
+  # Input 은 "JSON 을 담은 문자열" 이라 이스케이프가 까다로우므로 python 에 맡기고
+  # 파일로 넘긴다.
+  python3 -c "import json,sys; print(json.dumps([{'Id':'1','Arn':sys.argv[1],'Input':json.dumps({'job':'sync'})}]))" \
+    "$fn_arn" > build/targets.json
+
   aws events put-targets --rule "$RULE_NAME" --region "$REGION" \
-    --targets "Id=1,Arn=$fn_arn,Input={\"job\":\"sync\"}" >/dev/null
+    --targets "file://build/targets.json" >/dev/null
 }
 
 # ── 서브커맨드 ───────────────────────────────────────────────
