@@ -131,6 +131,8 @@ P_BRANCH      = "Default Branch"  # rich_text
 P_PUSHED_AT   = "Pushed At"       # date
 P_CREATED_AT  = "Created At"      # date
 P_SYNCED_AT   = "Synced At"       # date
+P_COMMITTER   = "Last Committer"   # select   (마지막 커밋 작성자)
+P_COMMIT_AT   = "Last Commit At"   # date     (마지막 커밋 시각)
 P_SIGNATURE   = "Sync Signature"  # rich_text (변경 감지용 해시)
 
 # Notion rich_text 1개 블록의 최대 길이
@@ -302,6 +304,31 @@ def fetch_org_repos() -> list:
     return repos
 
 
+def fetch_last_commit(full_name: str) -> dict:
+    """
+    최신 커밋 1건을 조회한다.
+
+    committer 가 아니라 author 를 쓴다. GitHub UI 에서 만든 머지 커밋은
+    committer 가 web-flow(GitHub 봇)로 기록되어 실제 사람을 알 수 없다.
+    GitHub 계정이 연결돼 있으면 login, 아니면 커밋에 적힌 이름을 쓴다.
+    """
+    try:
+        data, _ = github_request(f"repos/{full_name}/commits", {"per_page": 1})
+    except RuntimeError as e:
+        # 빈 저장소(409)나 접근 불가는 치명적이지 않으므로 건너뛴다.
+        print(f"  경고: {full_name} 커밋 조회 실패 — {e}")
+        return {}
+
+    if not data:
+        return {}
+
+    c = data[0]
+    commit = c.get("commit", {})
+    author = c.get("author") or {}
+    who = author.get("login") or commit.get("author", {}).get("name") or ""
+    return {"committer": who, "date": commit.get("author", {}).get("date")}
+
+
 def build_matcher():
     """이름 패턴 매칭 함수를 만든다. 규칙이 하나도 없으면 즉시 실패시킨다."""
     if REPO_NAME_REGEX:
@@ -352,11 +379,14 @@ def _date(value: str):
     return {"start": value}
 
 
-def build_properties(repo: dict) -> dict:
+def build_properties(repo: dict, last_commit: dict = None) -> dict:
     """GitHub 저장소 객체를 Notion 프로퍼티로 변환한다."""
     topics = repo.get("topics") or []
+    last_commit = last_commit or {}
 
     return {
+        P_COMMITTER:   {"select": _select(last_commit.get("committer"))},
+        P_COMMIT_AT:   {"date": _date(last_commit.get("date"))},
         P_NAME:        {"title": [{"type": "text", "text": {"content": repo["name"][:RICH_TEXT_LIMIT]}}]},
         P_FULL_NAME:   {"rich_text": _rich_text(repo.get("full_name", ""))},
         P_REPO_ID:     {"number": repo["id"]},
@@ -424,7 +454,7 @@ def sync_repos(data_source_id: str, repos: list) -> dict:
         repo_id = repo["id"]
         seen_ids.add(repo_id)
 
-        props = build_properties(repo)
+        props = build_properties(repo, fetch_last_commit(repo["full_name"]))
         signature = signature_of(props)
 
         current = existing.get(repo_id)
@@ -502,6 +532,8 @@ def init_database() -> dict:
         P_PUSHED_AT:   {"type": "date",         "date": {}},
         P_CREATED_AT:  {"type": "date",         "date": {}},
         P_SYNCED_AT:   {"type": "date",         "date": {}},
+        P_COMMITTER:   {"type": "select",       "select": {}},
+        P_COMMIT_AT:   {"type": "date",         "date": {}},
         P_SIGNATURE:   {"type": "rich_text",    "rich_text": {}},
     }
 

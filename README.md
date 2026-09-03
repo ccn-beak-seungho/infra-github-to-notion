@@ -25,12 +25,15 @@ Notion 내장 GitHub 동기화는 이슈와 PR만 지원하고 저장소 목록 
 
 ## Notion DB 스키마
 
-`init` 잡이 아래 17개 프로퍼티를 갖춘 DB를 만들어준다.
+`init` 잡이 아래 19개 프로퍼티를 갖춘 DB를 만들어준다.
 
 > DB 를 다른 페이지로 **이동**하면 integration 권한 상속이 끊겨 접근이 404 가 된다.
 > 이동 후에는 새 위치에서 Connections 를 다시 추가해야 한다. DB **제목** 변경은 안전하지만,
 > **프로퍼티 이름**은 바꾸면 안 된다 (`Repo ID` 는 업서트 키, `Sync Signature` 는 변경 감지용).
 > 보기 싫은 컬럼은 삭제 대신 Notion 뷰에서 숨긴다.
+>
+> `.env` 를 고쳐도 람다에는 반영되지 않는다. 규칙이나 옵션을 바꿨으면 `./deploy.sh` 를 다시 돌려야
+> 다음 자동 실행에 적용된다.
 
 | 프로퍼티 | 타입 | 출처 |
 |---|---|---|
@@ -49,6 +52,8 @@ Notion 내장 GitHub 동기화는 이슈와 PR만 지원하고 저장소 목록 
 | `Default Branch` | rich_text | 기본 브랜치 |
 | `Pushed At` | date | 마지막 푸시 |
 | `Created At` | date | 생성일 |
+| `Last Committer` | select | 마지막 커밋 작성자 (GitHub login) |
+| `Last Commit At` | date | 마지막 커밋 시각 |
 | `Synced At` | date | 마지막 동기화 시각 |
 | `Sync Signature` | rich_text | 변경 감지용 해시 (건드리지 말 것) |
 
