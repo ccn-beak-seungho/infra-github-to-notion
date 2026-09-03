@@ -36,7 +36,15 @@ def _load_dotenv(path: str = "") -> None:
             if not line or line.startswith("#") or "=" not in line:
                 continue
             key, _, value = line.partition("=")
-            key, value = key.strip(), value.strip().strip("'\"")
+            key, value = key.strip(), value.strip()
+            # 값 뒤에 붙은 인라인 주석 제거 (" #" 앞까지만 값으로 본다).
+            # 토큰에 " #" 가 들어가는 경우는 없으므로 안전하다.
+            if " #" in value:
+                value = value.split(" #", 1)[0].strip()
+            # 값 자리에 주석만 적힌 경우는 빈 값으로 취급한다.
+            if value.startswith("#"):
+                value = ""
+            value = value.strip("'\"")
             # 이미 설정된 실제 환경 변수가 우선한다.
             if key and value and key not in os.environ:
                 os.environ[key] = value
@@ -133,6 +141,7 @@ P_FULL_NAME   = "Full Name"       # rich_text
 P_REPO_ID     = "Repo ID"         # number  (업서트 키)
 P_URL         = "URL"             # url
 P_DESC        = "Description"     # rich_text
+P_DESC_JA     = "Description (JA)"  # rich_text (일본어 설명)
 P_LANGUAGE    = "Language"        # select
 P_VISIBILITY  = "Visibility"      # select
 P_TOPICS      = "Topics"          # multi_select
@@ -361,19 +370,32 @@ def fetch_readme(full_name: str) -> dict:
     return {"sha": data.get("sha", ""), "text": text}
 
 
-def summarize_readme(full_name: str, text: str) -> str:
-    """README 를 한 줄 설명으로 요약한다. 실패하면 빈 문자열을 돌려준다."""
+def summarize_readme(full_name: str, text: str) -> dict:
+    """
+    README 를 한국어/일본어 설명으로 요약한다.
+
+    두 언어를 한 번의 호출로 받는다. 호출 수를 늘리지 않고, 두 문장이
+    같은 이해에서 나오므로 내용이 어긋나지 않는다.
+    실패하면 빈 dict 를 돌려준다.
+    """
     if not (AI_GATEWAY_URL and text.strip()):
-        return ""
+        return {}
 
     prompt = (
         "다음은 GitHub 저장소의 README 입니다. 이 저장소가 무엇을 하는 것인지 "
-        "한국어 1~2문장으로 설명하세요. 설치법이나 사용법은 빼고 목적과 역할만 "
-        "쓰고, 군더더기 없이 문장만 출력하세요.\n\n"
+        "한국어와 일본어로 각각 1~2문장으로 설명하세요. 설치법이나 사용법은 빼고 "
+        "목적과 역할만 씁니다.\n"
+        '반드시 아래 JSON 형식만 출력하세요. 코드펜스나 다른 설명은 붙이지 마세요.\n'
+        '{"ko": "한국어 설명", "ja": "日本語の説明"}\n\n'
         f"저장소: {full_name}\n\n{text[:README_CHARS]}"
     )
 
-    headers = {"Content-Type": "application/json"}
+    # User-Agent 를 반드시 지정한다. urllib 기본값(Python-urllib/x.y)은
+    # Cloudflare 브라우저 무결성 검사에 걸려 403 error code 1010 이 된다.
+    headers = {
+        "Content-Type": "application/json",
+        "User-Agent": "notion-repo-sync",
+    }
     if CF_AIG_TOKEN:
         headers["cf-aig-authorization"] = f"Bearer {CF_AIG_TOKEN}"
     if OPENAI_API_KEY:
@@ -383,7 +405,7 @@ def summarize_readme(full_name: str, text: str) -> str:
     payload = {
         "model": OPENAI_MODEL,
         "messages": [{"role": "user", "content": prompt}],
-        "max_tokens": 300,
+        "max_tokens": 600,
         "temperature": 0.2,
     }
 
@@ -394,13 +416,26 @@ def summarize_readme(full_name: str, text: str) -> str:
     try:
         with urllib.request.urlopen(req, timeout=HTTP_TIMEOUT * 3) as res:
             body = json.loads(res.read())
-        return (body["choices"][0]["message"]["content"] or "").strip()
+        raw = (body["choices"][0]["message"]["content"] or "").strip()
     except urllib.error.HTTPError as e:
-        detail = e.read().decode()[:200]
-        print(f"  경고: {full_name} 요약 실패 (HTTP {e.code}) — {detail}")
+        print(f"  경고: {full_name} 요약 실패 (HTTP {e.code}) — {e.read().decode()[:200]}")
+        return {}
     except Exception as e:
         print(f"  경고: {full_name} 요약 실패 — {e}")
-    return ""
+        return {}
+
+    # 모델이 코드펜스를 붙이는 경우가 있어 벗겨낸다.
+    if raw.startswith("```"):
+        raw = raw.split("\n", 1)[-1].rsplit("```", 1)[0].strip()
+
+    try:
+        data = json.loads(raw)
+        return {"ko": (data.get("ko") or "").strip(),
+                "ja": (data.get("ja") or "").strip()}
+    except json.JSONDecodeError:
+        # JSON 이 아니면 통째로 한국어 설명으로 취급한다.
+        print(f"  경고: {full_name} 요약이 JSON 형식이 아님 — 한국어로만 저장")
+        return {"ko": raw, "ja": ""}
 
 
 def build_matcher():
@@ -467,6 +502,7 @@ def build_properties(repo: dict, last_commit: dict = None, has_readme: bool = Fa
         P_REPO_ID:     {"number": repo["id"]},
         P_URL:         {"url": repo.get("html_url") or None},
         P_DESC:        {"rich_text": _rich_text(repo.get("description") or "")},
+        P_DESC_JA:     {"rich_text": []},
         P_LANGUAGE:    {"select": _select(repo.get("language"))},
         P_VISIBILITY:  {"select": _select(repo.get("visibility") or ("private" if repo.get("private") else "public"))},
         P_TOPICS:      {"multi_select": [{"name": t[:100]} for t in topics[:100]]},
@@ -506,7 +542,18 @@ def fetch_existing_pages(data_source_id: str) -> dict:
             sig_blocks = (props.get(P_SIGNATURE) or {}).get("rich_text") or []
             signature = sig_blocks[0]["plain_text"] if sig_blocks else ""
 
-            index[int(repo_id)] = {"page_id": page["id"], "signature": signature}
+            def _filled(key):
+                blocks = (props.get(key) or {}).get("rich_text") or []
+                return bool(blocks and blocks[0].get("plain_text", "").strip())
+
+            # 두 언어가 모두 채워졌을 때만 완료로 본다.
+            has_desc = _filled(P_DESC) and _filled(P_DESC_JA)
+
+            index[int(repo_id)] = {
+                "page_id": page["id"],
+                "signature": signature,
+                "has_desc": has_desc,
+            }
 
         if not result.get("has_more"):
             break
@@ -537,7 +584,17 @@ def sync_repos(data_source_id: str, repos: list) -> dict:
 
         current = existing.get(repo_id)
 
-        if current and current["signature"] == signature:
+        # 요약을 만들 수 있는데 아직 비어 있는 행은 해시가 같아도 채워준다.
+        # (요약문은 해시에 없으므로, 이 예외가 없으면 영영 비어 있게 된다)
+        needs_summary = bool(
+            AI_GATEWAY_URL
+            and readme.get("text")
+            and not repo.get("description")
+            and current
+            and not current.get("has_desc")
+        )
+
+        if current and current["signature"] == signature and not needs_summary:
             stats["skipped"] += 1
             continue
 
@@ -545,8 +602,10 @@ def sync_repos(data_source_id: str, repos: list) -> dict:
         # 비어 있을 때만 README 요약으로 채운다.
         if not repo.get("description") and readme.get("text"):
             summary = summarize_readme(full_name, readme["text"])
-            if summary:
-                props[P_DESC] = {"rich_text": _rich_text(summary)}
+            if summary.get("ko"):
+                props[P_DESC] = {"rich_text": _rich_text(summary["ko"])}
+            if summary.get("ja"):
+                props[P_DESC_JA] = {"rich_text": _rich_text(summary["ja"])}
 
         props[P_SIGNATURE] = {"rich_text": _rich_text(signature)}
 
@@ -605,6 +664,7 @@ def init_database() -> dict:
         P_REPO_ID:     {"type": "number",       "number": {}},
         P_URL:         {"type": "url",          "url": {}},
         P_DESC:        {"type": "rich_text",    "rich_text": {}},
+        P_DESC_JA:     {"type": "rich_text",    "rich_text": {}},
         P_LANGUAGE:    {"type": "select",       "select": {}},
         P_VISIBILITY:  {"type": "select",       "select": {}},
         P_TOPICS:      {"type": "multi_select", "multi_select": {}},
