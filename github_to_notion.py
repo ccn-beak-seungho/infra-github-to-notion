@@ -198,14 +198,43 @@ def github_request(path: str, params: dict = None) -> tuple:
             return json.loads(res.read()), dict(res.headers)
     except urllib.error.HTTPError as e:
         body = e.read().decode()
-        if e.code in (403, 429):
-            remaining = e.headers.get("X-RateLimit-Remaining")
-            reset     = e.headers.get("X-RateLimit-Reset")
+        try:
+            message = json.loads(body).get("message", body)
+        except json.JSONDecodeError:
+            message = body
+
+        remaining = e.headers.get("X-RateLimit-Remaining")
+
+        # rate limit 은 remaining 이 0 일 때만이다. 403 은 조직 정책·권한 등
+        # 원인이 다양하므로 GitHub 이 준 메시지를 그대로 보여준다.
+        if e.code == 429 or (e.code == 403 and remaining == "0"):
+            reset = e.headers.get("X-RateLimit-Reset", "")
+            when = ""
+            if reset.isdigit():
+                when = datetime.fromtimestamp(int(reset), timezone.utc).isoformat()
+            detail = f"해제 시각(UTC): {when}" if when else "잠시 후 다시 시도하세요."
+            raise RuntimeError(f"GitHub API rate limit 초과. {detail}") from e
+
+        if e.code == 403:
             raise RuntimeError(
-                f"GitHub API {e.code} (rate limit 가능성). "
-                f"remaining={remaining} reset={reset} body={body}"
+                f"GitHub API 403 (권한/정책 거부, rate limit 아님 remaining={remaining})\n"
+                f"  → {message}"
             ) from e
-        raise RuntimeError(f"GitHub API {e.code} 오류: {body}") from e
+
+        if e.code == 404:
+            raise RuntimeError(
+                f"GitHub API 404: {message}\n"
+                f"  → GITHUB_ORG='{GITHUB_ORG}' 가 조직이 맞는지 확인하세요. "
+                f"개인 계정이면 이 엔드포인트로는 조회되지 않습니다."
+            ) from e
+
+        if e.code == 401:
+            raise RuntimeError(
+                f"GitHub API 401: {message}\n"
+                f"  → GITHUB_TOKEN 이 잘못됐거나 만료됐습니다."
+            ) from e
+
+        raise RuntimeError(f"GitHub API {e.code} 오류: {message}") from e
 
 
 # ── Data Source ID 해석 ──────────────────────────────────────
