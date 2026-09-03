@@ -10,6 +10,7 @@ EventBridge 입력의 job 값으로 동작 분기:
   {"job": "list"}             → 저장소 이름 목록 출력 (규칙 정하기용, Notion 불필요)
 """
 
+import base64
 import hashlib
 import json
 import os
@@ -98,6 +99,18 @@ NOTION_DB_INLINE = os.environ.get("NOTION_DB_INLINE", "true").lower() == "true"
 # DB 제목. 비우면 "{조직명} Repositories".
 NOTION_DB_TITLE  = os.environ.get("NOTION_DB_TITLE", "").strip()
 
+# ── README 요약 (선택) ──────────────────────────────────────
+# AI_GATEWAY_URL 이 설정된 경우에만 요약을 만든다.
+#   예: https://gateway.ai.cloudflare.com/v1/<account_id>/<gateway_id>/openai
+# 게이트웨이가 OpenAI 키를 보관(BYOK)하면 OPENAI_API_KEY 는 비워도 된다.
+AI_GATEWAY_URL = os.environ.get("AI_GATEWAY_URL", "").rstrip("/")
+CF_AIG_TOKEN   = os.environ.get("CF_AIG_TOKEN", "")
+OPENAI_API_KEY = os.environ.get("OPENAI_API_KEY", "")
+OPENAI_MODEL   = os.environ.get("OPENAI_MODEL", "gpt-4o-mini")
+
+# LLM 에 넘길 README 최대 길이. 앞부분만으로 충분하고 비용도 억제된다.
+README_CHARS = int(os.environ.get("README_CHARS", "6000"))
+
 # ── Slack 실패 알림 (선택) ───────────────────────────────────
 # 둘 다 설정된 경우에만 알림을 보낸다. 없으면 조용히 건너뛴다.
 SLACK_BOT_TOKEN = os.environ.get("SLACK_BOT_TOKEN", "")
@@ -128,6 +141,7 @@ P_OPEN_ISSUES = "Open Issues"     # number
 P_BRANCH      = "Default Branch"  # rich_text
 P_PUSHED_AT   = "Pushed At"       # date
 P_CREATED_AT  = "Created At"      # date
+P_HAS_README  = "Has README"      # checkbox (README.md 존재 여부)
 P_COMMITTER   = "Last Committer"   # select   (마지막 커밋 작성자)
 P_COMMIT_AT   = "Last Commit At"   # date     (마지막 커밋 시각)
 P_SIGNATURE   = "Sync Signature"  # rich_text (변경 감지용 해시)
@@ -326,6 +340,69 @@ def fetch_last_commit(full_name: str) -> dict:
     return {"committer": who, "date": commit.get("author", {}).get("date")}
 
 
+def fetch_readme(full_name: str) -> dict:
+    """
+    README 를 조회한다. 없으면 빈 dict.
+
+    sha 를 함께 돌려주는 이유는 변경 감지 때문이다. 요약문 자체는 해시에서
+    빼고 sha 를 넣어야, README 가 그대로인 저장소에 LLM 을 다시 호출하지 않는다.
+    """
+    try:
+        data, _ = github_request(f"repos/{full_name}/readme")
+    except RuntimeError:
+        # README 가 없으면 404 이고 이는 정상 경로이므로 조용히 처리한다.
+        return {}
+
+    try:
+        text = base64.b64decode(data.get("content", "")).decode("utf-8", "replace")
+    except Exception:
+        text = ""
+
+    return {"sha": data.get("sha", ""), "text": text}
+
+
+def summarize_readme(full_name: str, text: str) -> str:
+    """README 를 한 줄 설명으로 요약한다. 실패하면 빈 문자열을 돌려준다."""
+    if not (AI_GATEWAY_URL and text.strip()):
+        return ""
+
+    prompt = (
+        "다음은 GitHub 저장소의 README 입니다. 이 저장소가 무엇을 하는 것인지 "
+        "한국어 1~2문장으로 설명하세요. 설치법이나 사용법은 빼고 목적과 역할만 "
+        "쓰고, 군더더기 없이 문장만 출력하세요.\n\n"
+        f"저장소: {full_name}\n\n{text[:README_CHARS]}"
+    )
+
+    headers = {"Content-Type": "application/json"}
+    if CF_AIG_TOKEN:
+        headers["cf-aig-authorization"] = f"Bearer {CF_AIG_TOKEN}"
+    if OPENAI_API_KEY:
+        # 게이트웨이가 키를 보관(BYOK)하면 이 헤더는 없어도 된다.
+        headers["Authorization"] = f"Bearer {OPENAI_API_KEY}"
+
+    payload = {
+        "model": OPENAI_MODEL,
+        "messages": [{"role": "user", "content": prompt}],
+        "max_tokens": 300,
+        "temperature": 0.2,
+    }
+
+    req = urllib.request.Request(
+        f"{AI_GATEWAY_URL}/chat/completions",
+        data=json.dumps(payload).encode(), method="POST", headers=headers,
+    )
+    try:
+        with urllib.request.urlopen(req, timeout=HTTP_TIMEOUT * 3) as res:
+            body = json.loads(res.read())
+        return (body["choices"][0]["message"]["content"] or "").strip()
+    except urllib.error.HTTPError as e:
+        detail = e.read().decode()[:200]
+        print(f"  경고: {full_name} 요약 실패 (HTTP {e.code}) — {detail}")
+    except Exception as e:
+        print(f"  경고: {full_name} 요약 실패 — {e}")
+    return ""
+
+
 def build_matcher():
     """이름 패턴 매칭 함수를 만든다. 규칙이 하나도 없으면 즉시 실패시킨다."""
     if REPO_NAME_REGEX:
@@ -376,12 +453,13 @@ def _date(value: str):
     return {"start": value}
 
 
-def build_properties(repo: dict, last_commit: dict = None) -> dict:
+def build_properties(repo: dict, last_commit: dict = None, has_readme: bool = False) -> dict:
     """GitHub 저장소 객체를 Notion 프로퍼티로 변환한다."""
     topics = repo.get("topics") or []
     last_commit = last_commit or {}
 
     return {
+        P_HAS_README:  {"checkbox": has_readme},
         P_COMMITTER:   {"select": _select(last_commit.get("committer"))},
         P_COMMIT_AT:   {"date": _date(last_commit.get("date"))},
         P_NAME:        {"title": [{"type": "text", "text": {"content": repo["name"][:RICH_TEXT_LIMIT]}}]},
@@ -448,14 +526,27 @@ def sync_repos(data_source_id: str, repos: list) -> dict:
         repo_id = repo["id"]
         seen_ids.add(repo_id)
 
-        props = build_properties(repo, fetch_last_commit(repo["full_name"]))
-        signature = signature_of(props)
+        full_name = repo["full_name"]
+        readme = fetch_readme(full_name)
+
+        props = build_properties(repo, fetch_last_commit(full_name), bool(readme))
+
+        # 요약문은 해시에 넣지 않는다. 대신 README 의 sha 를 넣어, README 가
+        # 그대로면 skip 되어 LLM 호출 자체가 일어나지 않게 한다.
+        signature = signature_of({**props, "_readme_sha": readme.get("sha", "")})
 
         current = existing.get(repo_id)
 
         if current and current["signature"] == signature:
             stats["skipped"] += 1
             continue
+
+        # GitHub 의 description 이 있으면 사람이 쓴 그것을 우선하고,
+        # 비어 있을 때만 README 요약으로 채운다.
+        if not repo.get("description") and readme.get("text"):
+            summary = summarize_readme(full_name, readme["text"])
+            if summary:
+                props[P_DESC] = {"rich_text": _rich_text(summary)}
 
         props[P_SIGNATURE] = {"rich_text": _rich_text(signature)}
 
@@ -522,6 +613,7 @@ def init_database() -> dict:
         P_BRANCH:      {"type": "rich_text",    "rich_text": {}},
         P_PUSHED_AT:   {"type": "date",         "date": {}},
         P_CREATED_AT:  {"type": "date",         "date": {}},
+        P_HAS_README:  {"type": "checkbox",     "checkbox": {}},
         P_COMMITTER:   {"type": "select",       "select": {}},
         P_COMMIT_AT:   {"type": "date",         "date": {}},
         P_SIGNATURE:   {"type": "rich_text",    "rich_text": {}},

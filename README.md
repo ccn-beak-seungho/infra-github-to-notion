@@ -25,7 +25,7 @@ Notion 내장 GitHub 동기화는 이슈와 PR만 지원하고 저장소 목록 
 
 ## Notion DB 스키마
 
-`init` 잡이 아래 16개 프로퍼티를 갖춘 DB를 만들어준다.
+`init` 잡이 아래 17개 프로퍼티를 갖춘 DB를 만들어준다.
 
 > DB 를 다른 페이지로 **이동**하면 integration 권한 상속이 끊겨 접근이 404 가 된다.
 > 이동 후에는 새 위치에서 Connections 를 다시 추가해야 한다. DB **제목** 변경은 안전하지만,
@@ -50,6 +50,7 @@ Notion 내장 GitHub 동기화는 이슈와 PR만 지원하고 저장소 목록 
 | `Default Branch` | rich_text | 기본 브랜치 |
 | `Pushed At` | date | 마지막 푸시 |
 | `Created At` | date | 생성일 |
+| `Has README` | checkbox | README.md 존재 여부 |
 | `Last Committer` | select | 마지막 커밋 작성자 (GitHub login) |
 | `Last Commit At` | date | 마지막 커밋 시각 |
 | `Sync Signature` | rich_text | 변경 감지용 해시 (건드리지 말 것) |
@@ -105,6 +106,11 @@ Resource owner 를 조직으로 지정하면 토큰이 `pending` 상태로 발�
 | `DRY_RUN` | | `true` 면 쓰기 없이 계획만 출력 |
 | `SLACK_BOT_TOKEN` | | 실패 알림용. `SLACK_CHANNEL` 과 함께 있어야 동작 |
 | `SLACK_CHANNEL` | | 알림 채널 ID |
+| `AI_GATEWAY_URL` | | 설정 시 README 를 요약해 `Description` 을 채운다. Cloudflare AI Gateway 의 OpenAI 엔드포인트 |
+| `CF_AIG_TOKEN` | | 인증된 게이트웨이용 `cf-aig-authorization` 토큰 |
+| `OPENAI_API_KEY` | | 게이트웨이가 키를 보관(BYOK)하면 비워둔다 |
+| `OPENAI_MODEL` | | 기본 `gpt-4o-mini` |
+| `README_CHARS` | | LLM 에 넘길 README 최대 길이. 기본 6000 |
 
 `GITHUB_ORG` 는 **이 저장소의 위치가 아니라 카탈로그로 만들 대상 조직**이다.
 
