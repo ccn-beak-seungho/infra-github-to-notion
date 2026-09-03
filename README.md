@@ -68,9 +68,13 @@ Notion 내장 GitHub 동기화는 이슈와 PR만 지원하고 저장소 목록 
 [github.com/settings/personal-access-tokens](https://github.com/settings/personal-access-tokens) 에서 fine-grained PAT 을 발급한다.
 
 - **Resource owner 를 본인 계정이 아니라 대상 조직으로 지정**해야 한다
+- **Repository access 는 `All repositories`** 로 한다. `Only select repositories` 로 하면 그 시점의 저장소만 보여서,
+  나중에 만들어지는 저장소가 잡히지 않아 자동 등록의 목적이 무너진다
 - 권한은 Repository permissions → **Metadata: Read-only** 하나면 충분하다 (코드 읽기/쓰기 불가)
 
-조직에 따라 fine-grained PAT 이 비활성화돼 있거나 **관리자 승인 대기** 상태로 발급될 수 있다. 승인 전에는 API 가 조직 저장소를 빈 배열로 돌려주기 때문에, 규칙이 잘못된 것처럼 보이지만 실제로는 권한 문제다. 첫 실행의 수집 개수 로그로 판별할 수 있다.
+Resource owner 를 조직으로 지정하면 토큰이 `pending` 상태로 발급되고 조직 관리자 승인이 필요하다 (본인이 조직 owner 면 자동 승인). **승인 전까지는 public 리소스만 읽힌다.** 즉 비공개 저장소가 통째로 빠진 카탈로그가 만들어지며, 규칙이 잘못된 것처럼 보이지만 실제로는 승인 문제다.
+
+조직이 목록에 아예 안 보이면 그 조직이 fine-grained PAT 을 차단한 것이다.
 
 ## 환경 변수
 
@@ -135,7 +139,9 @@ python3 github_to_notion.py sync
 | 증상 | 원인 |
 |---|---|
 | `object_not_found` | 대상 페이지의 Connections 에 integration 이 추가되지 않음 |
-| 수집 개수가 0 | fine-grained PAT 이 조직 관리자 승인 대기 중이거나 Resource owner 가 조직으로 지정되지 않음 |
+| 비공개 저장소만 누락됨 | 토큰이 조직 관리자 **승인 대기(pending)** 중. 승인 전에는 public 리소스만 읽힌다 |
+| 수집 개수가 0 | Resource owner 가 조직이 아니라 개인 계정으로 지정됨 |
+| 나중에 만든 저장소가 안 잡힘 | 토큰의 Repository access 가 `Only select repositories` 로 되어 있음. `All repositories` 여야 한다 |
 | 매칭 0개 | `REPO_NAME_PREFIX` / `REPO_NAME_REGEX` 확인. `DRY_RUN=true` 로 먼저 점검 |
 | 행이 중복 생성됨 | `Sync Signature` 나 `Repo ID` 프로퍼티를 지웠는지 확인 |
 | `[설정 필요] ...` | 해당 환경 변수가 비어 있음. 메시지가 발급처를 안내한다 |
