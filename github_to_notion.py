@@ -7,6 +7,7 @@ GitHub 조직 저장소 → Notion DB 동기화 Lambda
 EventBridge 입력의 job 값으로 동작 분기:
   {"job": "sync"} 또는 미지정 → 저장소 동기화 (기본)
   {"job": "init"}             → Notion DB를 스키마와 함께 새로 생성
+  {"job": "list"}             → 저장소 이름 목록 출력 (규칙 정하기용, Notion 불필요)
 """
 
 import hashlib
@@ -57,8 +58,9 @@ GITHUB_TOKEN = _required("GITHUB_TOKEN",
 GITHUB_ORG   = _required("GITHUB_ORG",
     "GitHub 조직 슬러그입니다. 조직 페이지 URL의 github.com/<여기> 부분입니다.")
 
-NOTION_API_KEY   = _required("NOTION_API_KEY",
-    "notion.so/profile/integrations 에서 발급하세요 (ntn_ 로 시작).")
+# list 잡은 Notion 을 쓰지 않으므로 import 시점에 강제하지 않고,
+# 실제 호출 직전(notion_request)에 검증한다.
+NOTION_API_KEY   = os.environ.get("NOTION_API_KEY", "").strip()
 NOTION_REPO_DB_ID = os.environ.get("NOTION_REPO_DB_ID", "")
 
 # 특정 data source를 직접 지정하고 싶으면 설정 (없으면 자동 선택)
@@ -131,6 +133,11 @@ RICH_TEXT_LIMIT = 2000
 
 # ── Notion API 헬퍼 ──────────────────────────────────────────
 def notion_request(path: str, payload: dict = None, method: str = "POST") -> dict:
+    if not NOTION_API_KEY:
+        raise SystemExit(
+            "[설정 필요] NOTION_API_KEY 가 비어 있습니다. "
+            "notion.so/profile/integrations 에서 발급하세요 (ntn_ 로 시작)."
+        )
     url = f"https://api.notion.com/v1/{path}"
     data = json.dumps(payload).encode() if payload is not None else None
     req = urllib.request.Request(
@@ -504,11 +511,43 @@ def run_sync() -> dict:
     return stats
 
 
+def run_list() -> dict:
+    """저장소 이름을 훑어보며 매칭 규칙을 정하기 위한 잡. Notion 을 건드리지 않는다."""
+    repos = fetch_org_repos()
+    print(f"{GITHUB_ORG} 조직 저장소 {len(repos)}개\n")
+
+    has_rule = bool(REPO_NAME_REGEX or REPO_NAME_PREFIX)
+    matches = build_matcher() if has_rule else (lambda name: False)
+
+    matched = 0
+    for r in sorted(repos, key=lambda x: x["name"]):
+        hit = matches(r["name"])
+        matched += hit
+        mark = "✓" if hit else " "
+        flags = []
+        if r.get("private"):  flags.append("private")
+        if r.get("fork"):     flags.append("fork")
+        if r.get("archived"): flags.append("archived")
+        suffix = f"  [{', '.join(flags)}]" if flags else ""
+        print(f"  {mark} {r['name']}{suffix}")
+
+    if has_rule:
+        rule = REPO_NAME_REGEX or ",".join(REPO_NAME_PREFIX)
+        print(f"\n규칙 '{rule}' → {matched}/{len(repos)}개 매칭 (✓ 표시)")
+    else:
+        print("\n규칙이 설정되지 않아 매칭 표시를 생략했습니다.")
+        print("REPO_NAME_PREFIX 또는 REPO_NAME_REGEX 를 넣고 다시 실행하면 ✓ 로 확인됩니다.")
+
+    return {"total": len(repos), "matched": matched}
+
+
 def lambda_handler(event, context):
     job = (event or {}).get("job", "sync")
     try:
         if job == "init":
             return init_database()
+        if job == "list":
+            return run_list()
         return run_sync()
     except Exception as e:
         slack_notify(f"❌ GitHub→Notion 동기화 오류 [{GITHUB_ORG}/{job}]: {e}")

@@ -104,6 +104,9 @@ Resource owner 를 조직으로 지정하면 토큰이 `pending` 상태로 발�
 로컬 실행 시 `.env` 를 자동으로 읽는다. 실제 환경 변수가 있으면 그쪽이 우선한다.
 
 ```bash
+# 0) 저장소 이름을 훑어보며 매칭 규칙을 정한다 (Notion 자격 증명 불필요)
+python3 github_to_notion.py list
+
 # 1) Notion DB 생성 (최초 1회) → 출력된 DB ID 를 .env 에 반영
 python3 github_to_notion.py init
 
@@ -113,6 +116,27 @@ DRY_RUN=true python3 github_to_notion.py sync
 # 3) 실제 동기화
 python3 github_to_notion.py sync
 ```
+
+### 매칭 규칙 정하기
+
+`list` 는 조직의 저장소 이름을 정렬해 보여주고, 규칙이 설정돼 있으면 매칭되는 것에 `✓` 를 붙인다.
+`GITHUB_TOKEN` 과 `GITHUB_ORG` 만 있으면 되므로 Notion DB 를 만들기 전에 규칙부터 확정할 수 있다.
+
+```
+acme 조직 저장소 5개
+
+    docs-site
+  ✓ lambda-notify  [private]
+    legacy-tool  [fork, archived]
+  ✓ svc-auth  [private]
+  ✓ svc-billing  [private]
+
+규칙 'svc-,lambda-' → 3/5개 매칭 (✓ 표시)
+```
+
+규칙을 바꿔가며 `list` 를 다시 돌려 원하는 집합이 나올 때까지 맞춘 뒤 `init` 으로 넘어가면 된다.
+접두사로 충분하면 `REPO_NAME_PREFIX`(콤마 구분), 더 복잡한 조건이면 `REPO_NAME_REGEX` 를 쓴다.
+정규식은 `re.search` 로 평가되므로 앞부분만 맞추려면 `^` 를 붙여야 한다.
 
 ## 배포
 
